@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+cache/
+build/
+dist/
+paylasim/
+*.log
+*.spec
+!Eratone.spec

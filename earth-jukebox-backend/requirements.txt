@@ -1,0 +1,15 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+httpx>=0.27
+numpy>=1.26
+pillow>=10.1
+python-dotenv>=1.0
+colorama>=0.4.6
+pywebview>=6,<7
+# world-sound müzik sistemi (world-sound/requirements.txt ile aynı)
+scipy>=1.11
+sounddevice>=0.4.6
+# gerçek enstrüman kayıtlarını (OGG) çözer — world-sound/worldsound/sampler.py
+soundfile>=0.12
+# seslendirme: doğal Türkçe sesler (Emel/Ahmet), internet gerekir — app/speech.py (LGPLv3)
+edge-tts>=7.0

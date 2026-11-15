@@ -1,0 +1,3 @@
+Enstrüman kayıtları: FluidR3_GM soundfont (Frank Wen), MIDI.js dönüşümü https://github.com/gleitz/midi-js-soundfonts
+Lisans: Creative Commons Attribution 3.0 — https://creativecommons.org/licenses/by/3.0/us/
+Değişiklikler: mono, kırpma, düzey eşitleme, sürekli seslerde döngü; scripts/build_instrument_samples.py ile üretildi.

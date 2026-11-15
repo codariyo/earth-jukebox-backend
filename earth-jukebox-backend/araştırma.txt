@@ -1,0 +1,585 @@
+================================================================================
+  ERATONE — JÜRİ SUNUMU İÇİN ARAŞTIRMA
+  NASA Space Apps 2026 · Hazırlanma tarihi: 15 Kasım 2026
+================================================================================
+
+Bu dosya, jüri dokümanındaki araştırmanın sunum biçimindeki hâlidir.
+Her "SLAYT" bir sunum sayfası gibi düşünülebilir:
+  - Maddeler slayta yazılacak kısa bilgiler,
+  - "Konuşma notu" sunarken söylenecekler.
+Bölümler: Giriş · A. Backend ve veri · B. Müzik sistemi · Sınırlamalar.
+
+
+################################################################################
+#  GİRİŞ
+################################################################################
+
+--------------------------------------------------------------------------------
+SLAYT 1 — ERATONE: DÜNYAYI DİNLE
+--------------------------------------------------------------------------------
+  • NASA uydu haritalarını 3D küre ve 2D harita üzerinde gösterir.
+  • Haritanın renklerini canlı olarak müziğe çevirir.
+  • Windows masaüstü uygulaması: Eratone.exe, kurulum gerektirmez.
+  • Veri NASA GIBS'ten canlı gelir; API anahtarı gerekmez.
+
+  Konuşma notu:
+  "Eratone, iklim verisini hem görmenizi hem duymanızı sağlar. Bir haritaya
+  yaklaştığınızda o bölgenin sesini duyarsınız; tarihi değiştirdiğinizde
+  değişimi kulağınızla takip edersiniz."
+
+--------------------------------------------------------------------------------
+SLAYT 2 — 6 HARİTA KATMANI
+--------------------------------------------------------------------------------
+  Tema                  NASA katmanı                          Veri
+  --------------------  ------------------------------------  ----------------------
+  Dünya'nın Renkleri    MODIS_Terra_CorrectedReflectance_TC   2000 → dün, günlük
+  Sıcaklık Değişimi     MODIS_Terra_Land_Surface_Temp_Day     2000 → dün, günlük
+  Okyanus Akıntıları    OSCAR_Sea_Surface_Currents_Zonal      2014-10 → 2024-07
+  Bitki Örtüsü          MODIS_Terra_NDVI_8Day                 son ~2 yıl, 8 günlük
+  Yağış Dağılışı        IMERG_Precipitation_Rate              2000 → dün, günlük
+  Küresel Sıcaklık      MERRA2_2m_Air_Temperature_Monthly     1980 → 2026-08, aylık
+
+  Konuşma notu:
+  "Seçilebilir tarihler her harita için NASA'nın gerçek veri listesinden
+  okunur. Verisi olmayan günler tarih seçicide kapalıdır."
+
+--------------------------------------------------------------------------------
+SLAYT 3 — BİR BAKIŞTA MİMARİ
+--------------------------------------------------------------------------------
+  Ana fikir: Arayüz veriyi ve müziği tek bir yerel sunucudan alır.
+
+  +----------------------------------------------------------------------+
+  |  ERATONE PENCERESİ  (Edge WebView2)                                  |
+  |  [eratone.html]      [eratone-data.js]          [eratone-audio.js]   |
+  |   tasarım: küre,      NASA görüntüleri:          müzik kontrolleri   |
+  |   2D, tarih, müzik    kuyruk (6), önbellek,      → API, notalar,     |
+  |   paneli              aralık oynatıcı            spektrum            |
+  +-------------------------------|--------------------------|-----------+
+          /api/texture · /api/themes                 /api/audio/*
+          (JPEG + X-Date-Used)                       (JSON)
+  +-------------------------------|--------------------------|-----------+
+  |  FASTAPI SUNUCUSU  (127.0.0.1:38100 · pencereyle aynı süreç)         |
+  |  [main.py]            [gibs_api · maps · sound]   [audio.py]         |
+  |   uç noktalar,         tarih oturtma, indirme,     AudioBridge:      |
+  |   doğrulama            birleştirme → JPEG          müzik köprüsü     |
+  +---------------|---------------|--------------------------|-----------+
+           okur/yazar      HTTPS, en çok 8 paralel      aynı süreç,
+                           20 sn zaman aşımı, 3 deneme  komut kuyruğu
+  [Disk önbelleği]        [NASA GIBS]                 [world-sound motoru]
+   katman/tarih             WMS GetMap (EPSG:4326)      renk → nota →
+   klasörleri               WMTS GetCapabilities        enstrüman → EQ →
+                                                         yankı → hoparlör
+
+  Konuşma notu:
+  "Arayüz NASA'ya hiç doğrudan gitmez. Bütün veri bilgisayarın içindeki
+  yerel sunucudan geçer. Müzik motoru da aynı uygulamanın içinde çalışır
+  ve sesi doğrudan hoparlöre verir."
+
+--------------------------------------------------------------------------------
+SLAYT 4 — DİLLER VE KÜTÜPHANELER
+--------------------------------------------------------------------------------
+  Katman              Dil                 Kütüphane                     Ne için
+  ------------------  ------------------  ----------------------------  ------------------------------
+  Sunucu (backend)    Python 3.13         FastAPI, uvicorn, pydantic    HTTP API, girdi doğrulama
+  NASA istemcisi      Python              httpx (asenkron)              paralel istek, yeniden deneme
+  Görüntü işleme      Python              Pillow, numpy                 katman birleştirme, JPEG/PNG
+  Müzik motoru        Python              numpy, scipy.signal,          sentez, ekolayzer,
+                                          sounddevice (PortAudio)       hoparlöre çıkış
+  Arayüz              HTML, CSS, JS       globe.gl 2.34.4 (Three.js)    3D küre, 2D harita, kontroller
+  Açılış animasyonu   JavaScript          Three.js r128                 dönen dünya intro
+  Masaüstü pencere    Python              pywebview 6 (Edge WebView2)   tarayıcısız pencere
+  Paketleme           Python, PowerShell  PyInstaller 6                 Python gerektirmeyen exe
+  Test                Python              pytest                        67 otomatik test
+  Veri                —                   NASA GIBS (WMS, WMTS)         uydu katmanları
+
+  Konuşma notu:
+  "Python'u seçtik çünkü NASA görüntülerini işleyen kütüphaneler ile müzik
+  sentezi aynı dilde ve aynı süreçte çalışabiliyor. Tüm kütüphaneler
+  uygulamanın içinde gelir; internet yalnızca NASA verisi için gerekir."
+
+
+################################################################################
+#  BÖLÜM A — BACKEND VE VERİ
+################################################################################
+
+--------------------------------------------------------------------------------
+SLAYT 5 — BACKEND MİMARİSİ: MODÜLLER
+--------------------------------------------------------------------------------
+  • eratone_app.py   → Masaüstü giriş: tek örnek kilidi, sunucuyu arka iş
+                       parçacığında başlatır, WebView2 penceresini açar,
+                       kapanışta sunucuyu düzgün durdurur.
+  • app/main.py      → Tüm uç noktalar, pydantic doğrulama, arayüz dosyalarını
+                       sunma; kapanışta ses kartını bırakma + önbellek temizliği.
+  • app/gibs_api.py  → NASA'ya giden BÜTÜN istekler: en çok 8 paralel, 20 sn
+                       okuma zaman aşımı, 3 deneme, aynı görüntü için tek
+                       indirme, disk önbelleği.
+  • app/capabilities.py → NASA katman listesini (~5 MB XML, 12 saat önbellek)
+                       okur, her katmanın gerçek tarih listesini çıkarır.
+  • app/maps.py      → Tema ↔ NASA katmanı, tarih oturtma, katman çekme.
+  • app/sound.py     → Doku: Blue Marble + veri + kıyı çizgisi → tek JPEG
+                       (2048 veya 4096 px); bellekte son 48 görüntü.
+  • app/colormap.py, sonify.py, compare.py, render.py → NASA renk ölçeğinden
+                       gerçek değer (°C vb.), karşılaştırma, GIF gibi ek özellikler.
+  • app/audio.py     → Müzik motoruna köprü (Bölüm B).
+  • app/config.py    → 6 tema, 11 bölge kutusu, sınırlar.
+
+  Konuşma notu:
+  "Backend, arayüzle aynı uygulamanın içinde çalışan bir FastAPI sunucusu.
+  Yalnızca bu bilgisayarın içinden erişilebilir, dışarıya kapalı."
+
+--------------------------------------------------------------------------------
+SLAYT 6 — BİR HARİTANIN YOLCULUĞU
+--------------------------------------------------------------------------------
+  1. Arayüz ister:  /api/texture/sicaklik?date=2026-11-14&width=2048
+  2. Tarih oturtma: istenen gün, NASA'nın o katman için yayımladığı listedeki
+     son geçerli tarihe çekilir (yoksa ilk tarihe). Kullanılan tarih
+     X-Date-Used başlığıyla bildirilir.
+  3. Sunucu NASA'ya 3 isteği aynı anda atar: veri katmanı (şeffaf PNG),
+     kıyı çizgisi, Blue Marble taban harita. Diskte olan tekrar istenmez.
+  4. Birleştirme ayrı iş parçacığında: taban soluklaştırılır, veri üstüne,
+     kıyı çizgisi en üste → JPEG.
+  5. Görüntü eşdikdörtgen (EPSG:4326, boylam × enlem) olduğu için küreye
+     doğrudan sarılır; 2D'de aynı görüntü kullanılır.
+
+  Konuşma notu:
+  "Kullanıcı hangi tarihi seçerse seçsin, ekranda gördüğü her şey NASA'nın
+  gerçek verisi. Veri olmayan bir gün seçilirse en yakın gerçek tarihi
+  kullanıyor ve bunu ekrana yazıyoruz."
+
+--------------------------------------------------------------------------------
+SLAYT 7 — ÖNBELLEK
+--------------------------------------------------------------------------------
+  • Haritalar diskte katman ve tarih klasörlerine ayrılır:
+      cache/wms/<katman>/<tarih>/
+  • Uygulama kapanırken her katmanın yalnızca EN YENİ tarihi kalır.
+  • Ölçüm: 425 MB → 30 MB.
+  • Pencere bileşeninin aynı görüntüleri ikinci kez diske yazması engellendi
+    (API yanıtları "no-store").
+
+--------------------------------------------------------------------------------
+SLAYT 8 — BACKEND ↔ FRONTEND BAĞLANTI KURALLARI
+--------------------------------------------------------------------------------
+  1. TEK ADRES: GET / → arayüz, /static/* → arayüz dosyaları, /api/* → veri.
+     Aynı kaynak olduğu için CORS gerekmez. Port sabit (38100), çünkü kayıtlı
+     tercihler adrese bağlı saklanır.
+  2. HARİTA = GÖRÜNTÜ: harita uç noktaları JSON değil doğrudan JPEG/PNG döner.
+     Hatalar da yazılı görüntü + doğru HTTP kodu (404, 422, 502).
+  3. TARİH SÖZLEŞMESİ: arayüz tarihi yollar, sunucu veri olan tarihe oturtur
+     ve X-Date-Used ile bildirir. /api/themes her temanın ilk/son tarihini ve
+     sıklığını verir → tarih seçicide verisiz günler kapanır.
+  4. SES = JSON KOMUTLAR: /api/audio/* pydantic ile doğrulanır
+     (EQ −12…+12 dB, ses düzeyi 0…1); yanıt {ok, error?}.
+  5. AKIŞ KONTROLÜ: arayüz aynı anda en çok 6 istek; ekrandaki görüntü
+     kuyruğun başına geçer, ön-yükleme iptal edilebilir; bellekte son 160
+     görüntü. Sunucu NASA'ya en çok 8 eşzamanlı istek.
+  6. ÖNBELLEK KURALI: /api/* "Cache-Control: no-store"; /static normal.
+  7. OLAYLARLA GEVŞEK BAĞ: tasarımcının HTML'ine az dokunmak için tarayıcı
+     olayları: eratone:date-applied, eratone:range-applied, eratone:frame,
+     eratone:view, eratone:audio.
+
+--------------------------------------------------------------------------------
+SLAYT 9 — ARAYÜZÜN KULLANDIĞI UÇ NOKTALAR
+--------------------------------------------------------------------------------
+  Uç nokta                                  Yöntem  Döner              Kim kullanır
+  ----------------------------------------  ------  -----------------  -----------------------------
+  /                                         GET     HTML               pencere açılışı
+  /api/themes                               GET     JSON               tarih seçici sınırları
+  /api/texture/{tema}?date=&width=&region=  GET     JPEG + X-Date-Used küre, 2D, 6 kart, kareler, zoom
+  /api/audio/source, /api/audio/view        POST    JSON               müziğin kaynağı ve görünen bölge
+  /api/audio/play, loop, instrument, eq     POST    JSON               müzik paneli
+  /api/audio/state                          GET     JSON               çalarken 120 ms'de bir
+
+  Ek (arayüz kullanmıyor, API'de var): başlıklı harita, aralık GIF'i,
+  iki tarih karşılaştırması, kutup projeksiyonu, lejant, NASA EONET doğal
+  olayları. Hepsi uygulama açıkken http://127.0.0.1:38100/docs adresinde.
+
+--------------------------------------------------------------------------------
+SLAYT 10 — TARİH ARALIĞI VE OYNATICI
+--------------------------------------------------------------------------------
+  • Kare tarihi = başlangıç + yuvarla(i × gün farkı / (kare sayısı − 1))
+  • En çok 60 kare.
+  • Aralık uygulanınca kareler kendiliğinden oynar (0,5 / 1 / 2 / 4 kare/sn).
+  • Sıradaki kare gelmeden geçilmez; 5 sn'den uzun gecikirse hazır olana atlanır.
+  • Ölçüm: ilk kare ~3 sn, 12 kare ~13 sn; sonrası önbellekten anında.
+
+--------------------------------------------------------------------------------
+SLAYT 11 — BACKEND: KRİTİK NOKTALAR (JÜRİ NEYİ SORABİLİR?)
+--------------------------------------------------------------------------------
+  Veri gerçek mi?
+    → Her görüntü NASA GIBS'ten canlı. Tarih oturtulduğunda ekranda yazılır.
+      Hiçbir veri uydurulmaz.
+  Hız
+    → NASA kare başına 1–5 sn ve değişken. Paralel indirme + yeniden deneme.
+      Ölçüm: 12 kare, 3 paralel 27,6 sn → 12 paralel 5,8 sn.
+  NASA cevap vermezse
+    → 20 sn'de kesip 3 kez yeniden dener; 5xx hatalarında da dener;
+      oynatıcı geciken kareyi atlar.
+  İnternet yoksa
+    → Önbellekteki tarihler ve katman listesinin son kopyası ile çalışır;
+      arayüz ve animasyon tamamen yerel. Yeni tarih için internet şart.
+  Siyah şeritler
+    → MODIS uydusunun yörünge boşlukları. Hata değil, verinin kendisi.
+  Veri aralıkları
+    → Sınırlar NASA'nın listesinden: akıntı 2024-07'de, bitki son ~2 yıl,
+      küresel sıcaklık aylık ve 2026-08'de biter.
+  Projeksiyon
+    → EPSG:4326 görüntü küreye bire bir sarılır. API ortalamaları enlemle
+      ağırlıklı (cos φ).
+  Netlik
+    → 4096 px doku + yakınlaşınca "detay yaması"; 2D'de 12× zoom.
+      8192 px denendi: 22 sn ve katman başına ~66 MB, pratik değil.
+  Güvenlik ve gizlilik
+    → Sunucu yalnızca 127.0.0.1'i dinler. API anahtarı yok, kullanıcı verisi
+      toplanmaz. Girdiler sınırlı (genişlik ≤ 4096, tarih/kutu doğrulaması).
+  Disk kullanımı
+    → Kapanışta katman başına yalnızca en yeni tarih (425 MB → 30 MB).
+  Kurulum ve boyut
+    → Eratone.exe 155 MB (zip 69 MB), Python gerekmez. Boyutun çoğu scipy,
+      numpy, Pillow. Windows 10/11 + WebView2. Kod imzası yok → ilk açılışta
+      Windows uyarısı çıkabilir.
+  Test
+    → 67 otomatik test; exe gerçek pencerede açılıp kapatılarak denendi.
+
+--------------------------------------------------------------------------------
+SLAYT 12 — BACKEND: ÖRNEK SORULAR VE CEVAPLAR
+--------------------------------------------------------------------------------
+  S1. Veriyi nereden ve nasıl alıyorsunuz?
+      NASA'nın GIBS servisinden, WMS GetMap istekleriyle (EPSG:4326,
+      WMS 1.1.1). Her katmanın hangi tarihlerde verisi olduğunu WMTS
+      GetCapabilities belgesinden okuyoruz. API anahtarı gerekmiyor.
+
+  S2. Neden Python ve FastAPI?
+      Görüntü işleme (numpy, Pillow) ve müzik sentezi (scipy) aynı dilde.
+      FastAPI asenkron olduğu için NASA'ya aynı anda 8 istek atabiliyor ve
+      /docs adresinde API dokümanını kendiliğinden üretiyor.
+
+  S3. Neden tarayıcıda değil de masaüstü uygulaması?
+      Sunucu, müzik motoru ve arayüz tek uygulamada; kullanıcı kurulum
+      yapmadan Eratone.exe'yi açıyor. Pencere Windows'un kendi Edge WebView2
+      bileşeniyle çiziliyor, ayrıca tarayıcı paketlemiyoruz. Geliştirmede
+      aynı uygulama tarayıcıda da açılabiliyor.
+
+  S4. Seçtiğim tarihte veri yoksa ne oluyor?
+      Sunucu o katmanın o güne kadarki son gerçek verisini (yoksa ilk
+      verisini) kullanıyor ve ekranda "X için veri yok, en yakın tarih Y"
+      yazıyor. Verisi hiç olmayan günler tarih seçicide zaten kapalı.
+
+  S5. NASA yavaşsa ya da cevap vermezse?
+      İstekler paralel. 20 sn'de cevap gelmezse ya da NASA geçici hata
+      (502/503/504) dönerse 3 kereye kadar yeniden deneniyor. Aynı görüntü
+      aynı anda iki kez istenirse NASA'ya tek istek gidiyor. Aralık
+      oynatılırken geciken kare atlanıyor, oynatma durmuyor.
+
+  S6. İnternet olmadan çalışır mı?
+      Kısmen. Daha önce açılan haritalar diskten geliyor, arayüz ve
+      animasyon tamamen yerel. İlk kez istenen tarih için NASA gerekli.
+
+  S7. Haritalardaki siyah şeritler hata mı?
+      Hayır. Günlük MODIS görüntülerinde uydunun o gün geçmediği alanlar
+      boş kalır. Bunu doldurmak veriyi çarpıtmak olurdu.
+
+  S8. Yakınlaşınca görüntü neden bulanıklaşmıyor?
+      Küre 4096 px dokuyla çiziliyor; yakınlaşınca bakılan bölge NASA'dan
+      ekran çözünürlüğünde ayrıca isteniyor ve küreye yama gibi yerleşiyor.
+      2D'de de görünen pencere ayrıca isteniyor. 8192 px tek doku denendi;
+      22 sn sürdüğü için seçilmedi.
+
+  S9. Güvenlik ve gizlilik?
+      Sunucu yalnızca bilgisayarın kendi içinden (127.0.0.1) erişilebiliyor.
+      Kullanıcıdan hiçbir veri alınmıyor ve saklanmıyor; API anahtarı yok.
+
+  S10. Bu sistem web'e ya da çok kullanıcıya taşınabilir mi?
+      Veri tarafı evet: backend standart bir HTTP API ve tarayıcıda
+      çalışıyor. Ancak müzik motoru sesi sunucunun hoparlörüne veriyor;
+      web'de her kullanıcının kendi cihazında çalması için sesin tarayıcıya
+      (Web Audio) taşınması gerekir. Bunu bir sonraki adım olarak görüyoruz.
+
+  S11. Nasıl test ettiniz?
+      67 otomatik test (tarih ayrıştırma, önbellek temizliği, ses köprüsü,
+      müzik motoru) internetsiz çalışıyor. Exe gerçek pencerede açılıp
+      kapatılarak, arayüz görünmez tarayıcıyla ekran görüntüsü alınarak
+      denendi; sıfırdan kurulum da boş bir klasörde denendi.
+
+
+################################################################################
+#  BÖLÜM B — MÜZİK SİSTEMİ
+################################################################################
+
+--------------------------------------------------------------------------------
+SLAYT 13 — MÜZİĞİN TEMEL FİKRİ
+--------------------------------------------------------------------------------
+  • Müzik, EKRANDA GÖRÜNEN haritanın renklerinden üretilir.
+  • Görünen bölge 36 satır × 64 sütunluk ızgaraya bölünür.
+  • Tarama çizgisi soldan sağa saniyede 5 sütun ilerler.
+  • Her sütundaki renkler notaya dönüşür.
+  • Sabit melodi, ritim ya da metronom YOK: harita sessizse müzik de sessiz.
+  • Motor: ekibimizin yazdığı "world-sound" kütüphanesi
+    (Python, numpy, scipy, sounddevice).
+
+  Konuşma notu:
+  "Müziği biz bestelemiyoruz; harita besteliyor. Türkiye'ye bakmak ile
+  Afrika'ya bakmak farklı müzik üretir."
+
+--------------------------------------------------------------------------------
+SLAYT 14 — RENK → NOTA KURALI
+--------------------------------------------------------------------------------
+  Her pikselin renk tonu (HSV) bir pes–tiz eksenine yerleştirilir.
+  Mavi en pes, kırmızı en tiz. Perde Do majör dizisindeki en yakın notaya
+  oturtulur.
+
+  Renk        Ton açısı   Eksendeki yeri   Nota
+  ----------  ----------  ---------------  -----------------
+  Mavi        240°        0,00             Do2  (en pes)
+  Camgöbeği   180°        0,25             Re3
+  Yeşil       120°        0,50             Fa4
+  Sarı         60°        0,75             La5
+  Kırmızı       0°        1,00             Si6  (en tiz)
+
+  • Mor/macenta maviden kırmızıya renk çemberinin öbür yolundan geri sarar;
+    hiçbir renkte ani nota sıçraması olmaz.
+
+--------------------------------------------------------------------------------
+SLAYT 15 — SESSİZLİK VE NOTANIN GÜCÜ
+--------------------------------------------------------------------------------
+  Sessiz kalan pikseller:
+    • Şeffaf → NASA "ölçüm yok"
+    • Çok karanlık → parlaklık < 0,12 (siyah)
+    • Renksiz → doygunluk < 0,20 (beyaz/gri, ör. bulut)
+
+  Notanın gücü (ses şiddeti) rengin canlılığından gelir:
+    güç = parlaklık^0,7 × (0,35 + 0,65 × doygunluk)
+
+  Konuşma notu:
+  "Veri olmayan yere ses uydurmuyoruz."
+
+--------------------------------------------------------------------------------
+SLAYT 16 — SİNYAL YOLU (8 ADIM)
+--------------------------------------------------------------------------------
+  1. VERİ (MapData): uygulamanın NASA katmanı, 2048 px, taban harita ve kıyı
+     çizgisi olmadan (yalnız ölçüm). Akıntı ve anomali gibi
+     mavi–beyaz–kırmızı haritalarda "ıraksak kip": soluk renk orta notaya,
+     doygun renk uçlara.
+  2. GÖRÜNÜM (Viewport): yalnızca ekranda görünen boylam/enlem kutusu taranır.
+  3. TARAMA (ViewportScanner): 36 × 64 hücre. Her hücrenin notası PİKSEL
+     OYLAMASIYLA bulunur: her piksel kendi notasını verir, en çok tekrar
+     eden kazanır. Hücrenin en az %30'u veri olmalı.
+  4. TEKRAR FİLTRESİ (NoteFilter): aynı sütunda aynı nota bir kez çalınır,
+     kapladığı alan büyüdükçe gürleşir; önceki sütunda çalan nota yeniden
+     vurulmaz, uzar. Bir anda en çok 10 farklı nota.
+  5. SIRALAYICI (ScanSequencer): her 0,2 sn bir sütun; 64 sütun ≈ 12,8 sn'de
+     bir tur. Görünüm değişince bulunduğu sütun hemen yeniden değerlendirilir.
+     Döngü açık/kapalı.
+  6. ENSTRÜMANLAR: arayüzde 5 enstrüman (piyano, keman, yan flüt, akustik
+     gitar, elektro gitar). Kayıt değil, matematiksel sentez (harmonik yapı,
+     ADSR zarfı, vibrato, koro, distorsiyon). Açık her enstrüman aynı notayı
+     birlikte çalar; her biri stereo alanda farklı yerde.
+  7. KARIŞIM VE EFEKTLER: 5 bant ekolayzer (100 Hz, 300 Hz, 1 kHz, 3 kHz,
+     8 kHz; ±12 dB) → salon yankısı → ana ses → yumuşak sınırlayıcı.
+  8. ÇIKIŞ: sounddevice (PortAudio), 44,1 kHz stereo, 1024 örneklik blok
+     (~23 ms). Her blokta FFT → 48 bantlık spektrum → arayüzdeki EQ çubukları.
+
+--------------------------------------------------------------------------------
+SLAYT 17 — TEKNİK AYRINTILAR (SORULURSA)
+--------------------------------------------------------------------------------
+  • Enstrümanlar: bant sınırlı dalga tablosu (wavetable). Yalnız Nyquist
+    sınırının altındaki harmonikler eklenir → tiz notalarda bozulma
+    (aliasing) olmaz.
+  • Ekolayzer: RBJ "Audio EQ Cookbook" biquad formülleri,
+    scipy.signal.sosfilt ile seri uygulanır. Filtre durumu sıfırdan başlar
+    → sessiz haritada uğultu olmaz; ayar değişince ses kesilmez.
+  • Yankı: Schroeder yapısı (4 tarak + 2 tüm-geçiren filtre).
+  • Sınırlayıcı: eşik 0,75 üstünde tanh ile yumuşak sınırlama → patlama yok.
+
+--------------------------------------------------------------------------------
+SLAYT 18 — MÜZİĞİN ARAYÜZE VE BACKEND'E BAĞLANIŞI
+--------------------------------------------------------------------------------
+  Motor tarayıcıda değil backend'de çalışır, sesi doğrudan hoparlöre verir.
+  Müzik, ekrandaki haritayla AYNI KATMANI, AYNI TARİHİ, AYNI ÖNBELLEĞİ
+  kullanır (world-sound'un kendi NASA istemcisi devre dışı).
+
+  Üç parça:
+  • eratone-data.js  → tema/tarih/bölge/zoom her değiştiğinde (saniyede en
+                       çok 4 kez) "eratone:view" olayını yayar: kaynak kutu +
+                       ekranda görünen boylam/enlem kutusu.
+  • eratone-audio.js → İlk "Çal"a kadar backend'e bir şey göndermez (ses kartı
+                       boşuna açılmasın). İlk Çal'da tüm ayarları toplu
+                       gönderir (5 enstrüman, ses düzeyleri, 5 EQ bandı,
+                       döngü), sonra her değişikliği iletir (EQ sürüklerken
+                       80 ms'de bir). Çalarken durumu 120 ms'de bir sorar.
+  • app/audio.py     → AudioBridge: motoru ilk ihtiyaçta kurar, katmanı
+                       uygulamanın NASA istemcisiyle çeker, son 6 haritayı
+                       bellekte tutar, yalnızca en son isteği uygular,
+                       görünen kutuyu kaynak kutunun içine kırpar.
+
+--------------------------------------------------------------------------------
+SLAYT 19 — ARAYÜZ → API → MOTOR
+--------------------------------------------------------------------------------
+  Arayüzde                         API                       Motorda
+  -------------------------------  ------------------------  -------------------------------------
+  Oynat / Duraklat                 play                      sıralayıcı başlar / notalar susar
+  Döngü                            loop                      tarama sonunda başa dönülür
+  Enstrüman düğmeleri              instrument {enabled}      enstrüman açılır/kapanır; açılan
+                                                             enstrüman çalan notalara hemen katılır
+  Mikser kaydırıcıları             instrument {volume 0–1}   enstrüman ses düzeyi
+  Ekolayzer (Bas, Düşük Mid,       eq {band, db}             100/300/1000/3000/8000 Hz,
+  Orta, Yüksek Mid, Tiz)                                     −12…+12 dB
+  Tema, tarih, bölge               source                    yeni harita yüklenir
+  Zoom, kaydırma, küreyi çevirme   view                      yalnız görünen pikseller yeniden taranır
+  Tarih aralığı kareleri           source (her kare)         müzik karenin tarihine geçer;
+                                                             zaman içindeki değişim duyulur
+
+--------------------------------------------------------------------------------
+SLAYT 20 — EŞZAMANLILIK
+--------------------------------------------------------------------------------
+  • HTTP istekleri asenkron işlenir.
+  • Harita yüklemesi ve tarama ayrı iş parçacıklarında → arayüz donmaz.
+  • Ses, PortAudio'nun kendi iş parçacığında üretilir.
+  • Arayüzden gelen komutlar bir kuyrukla ses iş parçacığına iletilir
+    → ayar değişirken ses kesilmez.
+
+--------------------------------------------------------------------------------
+SLAYT 21 — MÜZİK: KRİTİK NOKTALAR (JÜRİ NEYİ SORABİLİR?)
+--------------------------------------------------------------------------------
+  !!! EN ÖNEMLİSİ: Nota yüksekliği RENGİ temsil eder, ölçülen değeri
+      doğrudan değil. Bunu bilerek ve açıkça anlatmalıyız.
+
+  Nota neyi anlatıyor?
+    → NASA her katmanı kendi renk ölçeğiyle boyar; müzik bu rengi çalar.
+      Sıcaklık haritalarında ölçek maviden kırmızıya → tiz = sıcak.
+      Bitki örtüsünde ölçek kahverengiden yeşile → yeşil (yoğun bitki) orta
+      notaya, kahverengi (çıplak toprak) tize düşer. Yani "tiz = yüksek
+      değer" her haritada geçerli DEĞİL.
+  Neden değer değil renk?
+    → Renk kuralı her katmanda, gerçek renkli uydu fotoğrafında bile çalışır;
+      görülen ile duyulan birebir örtüşür. Backend NASA renk ölçeğinden gerçek
+      değeri (°C vb.) okuyabiliyor; değer tabanlı müzik bir sonraki adım.
+  Dünya'nın Renkleri nasıl ses verir?
+    → Bulut, kar, gri alanlar sessiz; okyanus mavisi pes; çöl kahvesi/
+      turuncusu tiz.
+  Kakofoni?
+    → Do majör dizisi (uyumsuz yarım ton yok), sütun başına en çok 10 nota,
+      aynı renk yeniden vurulmaz, yumuşak sınırlayıcı.
+  Tepki süresi?
+    → Ses blokları ~23 ms; zoom/kaydırmada müzik bir sonraki adımı beklemeden
+      yeni bölgeye geçer.
+  Ses nerede çalıyor?
+    → Uygulamanın çalıştığı bilgisayarın hoparlöründe. Masaüstü için doğru;
+      web sürümü için sesin tarayıcıya taşınması gerekir.
+  Erişilebilirlik iddiası?
+    → Müzik haritayı duyulur kılıyor; AMA Erkek/Kadın seslendirme düğmeleri
+      henüz bir ses motoruna bağlı değil. "Yakında" diye anlatmalı, çalışıyor
+      gibi göstermemeliyiz.
+  Özgünlük ve telif?
+    → Müzik motoru ekibin kendi kütüphanesi; enstrümanlar kayıt değil,
+      matematiksel sentez. Telifli ses dosyası yok.
+  Doğrulama?
+    → 17 motor testi + 6 köprü testi sesi ses kartı olmadan üretip denetliyor
+      (ör. siyah harita = tam sessizlik). Gerçek ses kartı açıkken (ses
+      düzeyi 0) Temmuz 2025 Küresel Sıcaklık haritasında Türkiye için
+      Sol6/La6/Si6 üretildiği doğrulandı (sıcak = kırmızı = tiz).
+      Sunumdan önce ekip olarak her haritada dinleyip ses düzeyi ve tempo
+      ayarlanmalı.
+
+--------------------------------------------------------------------------------
+SLAYT 22 — MÜZİK: ÖRNEK SORULAR VE CEVAPLAR
+--------------------------------------------------------------------------------
+  S1. Harita müziğe nasıl dönüşüyor, bir cümleyle?
+      Ekranda görünen bölge 36 × 64 hücreye bölünüyor, tarama çizgisi soldan
+      sağa ilerlerken her sütundaki renkler notaya dönüşüyor: mavi pes,
+      kırmızı tiz, aradaki renkler orantılı.
+
+  S2. Neden kırmızı tiz, mavi pes?
+      Isı haritalarının evrensel dilinde kırmızı sıcak/yüksek, mavi soğuk/
+      düşüktür; ses de bunu takip ediyor. Renk çemberini sürekli bir eksene
+      açtık, mor tonlar geri sardığı için ani nota sıçraması olmuyor.
+
+  S3. Neden hücrenin renk ortalamasını almıyorsunuz?
+      Yarısı kırmızı yarısı mavi bir hücrenin ortalaması mor çıkar ve
+      haritada olmayan bir nota çalar. Bunun yerine her piksel kendi notasını
+      veriyor, en çok tekrar eden kazanıyor; hücre haritada gerçekten bulunan
+      rengin sesini alıyor.
+
+  S4. Siyah ve beyaz alanlar neden sessiz?
+      Siyah ve şeffaf alanlar NASA'da "ölçüm yok"; beyaz ve gri ise renk
+      ekseninde bir yere sahip değil (ör. bulut). Veri olmayan yere ses
+      uydurmuyoruz.
+
+  S5. Yakınlaşınca müzik değişiyor mu?
+      Evet. Yalnızca görünen pikseller taranıyor; yakınlaştıkça hücre başına
+      alan küçülüyor, müzik ayrıntılanıyor. Türkiye ile Afrika farklı müzik
+      üretiyor.
+
+  S6. Tarih aralığını oynatınca ne duyuyoruz?
+      Her kare yeni tarihin haritasını motora yüklüyor; ör. kıştan yaza
+      sıcaklık haritasında notalar tizleşiyor. Değişimi hem görüyor hem
+      duyuyoruz.
+
+  S7. Enstrümanlar gerçek kayıt mı?
+      Hayır, matematiksel sentez. Avantajı: ses dosyası yok, her perde aynı
+      kalitede, gecikme yok, tiz notalarda bozulma yok. Dezavantajı: gerçek
+      enstrüman kadar zengin değil.
+
+  S8. Birden fazla enstrüman açınca ne oluyor?
+      Aynı harita notası açık tüm enstrümanlarda birlikte çalıyor; her biri
+      stereo alanda farklı yerde, ayrıştırılabiliyor. Çalarken açılan
+      enstrüman o an çalan notalara hemen katılıyor.
+
+  S9. Ekolayzer gerçekten sesi mi değiştiriyor, yoksa görsel mi?
+      Gerçek: 5 bantlı dijital filtre (100 Hz–8 kHz, ±12 dB) ses motorunun
+      içinde, hoparlöre gitmeden önce uygulanıyor. Paneldeki çubuklar da
+      gerçek spektrumu (her 23 ms'de bir FFT) gösteriyor.
+
+  S10. Neden ses tarayıcıda (Web Audio) değil de Python'da?
+      Müzik motorunu ekip olarak Python'da (numpy, scipy) geliştirdik;
+      masaüstü uygulamada sunucuyla aynı süreçte çalışıyor, veriye doğrudan
+      erişiyor. Web sürümü için tarayıcıya taşınması gerekir.
+
+  S11. Erkek/Kadın seslendirme ne yapıyor?
+      Dürüst cevap: arayüzde yeri hazır ama henüz bir konuşma motoruna bağlı
+      değil. Hedefi haritayı Türkçe sesli anlatmak (tarih, bölge, değer) ve
+      görme engelli kullanıcıya müziğin yanında bilgi vermek.
+
+
+################################################################################
+#  BİLİNEN SINIRLAMALAR
+################################################################################
+
+--------------------------------------------------------------------------------
+SLAYT 23 — BİLİNEN SINIRLAMALAR VE PLANLAR
+--------------------------------------------------------------------------------
+  Jüri sorarsa saklamadan, planıyla birlikte söylenmeli.
+
+  Sınır                                   Etkisi                          Plan
+  --------------------------------------  ------------------------------  ----------------------------------
+  Erkek/Kadın sesli anlatım bağlı değil   Düğmeler bir şey seslendirmiyor Türkçe konuşma motoruyla tarih,
+                                                                          bölge ve değerin okunması
+  Müzik renk tabanlı                      Bazı haritalarda tiz ≠ yüksek   Gerçek değer okuyan modülle
+                                          değer (ör. bitki örtüsü)        değer tabanlı müzik kipi
+  Renk ölçeği (lejant) arayüzde yok       Rengin değeri görünmüyor        API hazır (/api/legend/{tema});
+                                                                          arayüze eklenmesi
+  Yalnızca Windows 10/11                  macOS/Linux'ta pencere yok      Tarayıcı modu
+                                                                          (python kurulum.py --tarayici)
+  İlk kez görülen tarih için internet     Çevrimdışı demo sınırlı         Sunumdan önce gösterilecek
+                                                                          tarihleri bir kez açıp önbelleğe
+                                                                          almak
+  Kod imzası yok                          İlk açılışta Windows uyarısı    "Ek bilgi → Yine de çalıştır";
+                                                                          ileride imzalı kurulum
+  Ses uygulamanın bilgisayarında çalıyor  Web'e taşınamaz                 Sesin Web Audio'ya taşınması
+  Bazı NASA katmanlarının verisi bitmiş   Akıntı 2024-07'den sonra yok    Yeni katman çıktıkça
+                                                                          app/config.py'de ad değiştirilir
+
+--------------------------------------------------------------------------------
+SLAYT 24 — SUNUMDAN ÖNCE YAPILACAKLAR
+--------------------------------------------------------------------------------
+  [ ] Müziği ekip olarak her haritada dinle; ses düzeyi ve tempoyu ayarla.
+  [ ] Sunumda gösterilecek tarih ve bölgeleri bir kez açıp önbelleğe al
+      (salonda internet sorunu olursa diye).
+  [ ] Erkek/Kadın düğmelerini sunumda çalışıyormuş gibi gösterme.
+  [ ] Jüri "nota neyi temsil ediyor?" derse Slayt 21'deki cevabı ver.
+  [ ] Eratone.exe'yi sunum bilgisayarında önceden bir kez aç
+      (Windows uyarısını sunumdan önce geç).
+
+================================================================================
+  Ayrıntılı ve düzenlenebilir sürüm (Claude Docs):
+  https://claude.ai/artifact/6nFjxp8PBbUkxHRzxF7Bm9
+================================================================================
